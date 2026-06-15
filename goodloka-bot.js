@@ -1,4 +1,4 @@
-// kitabo.js – Bot de domino GoodLoka
+// goodloka-bot.js – Bot de domino GoodLoka
 const { connect } = require('puppeteer-real-browser');
 const path = require('path');
 const fs = require('fs');
@@ -8,6 +8,7 @@ const password = process.env.PASSWORD;
 const desiredScore = process.env.SCORE || '50';
 const desiredMise  = process.env.MISE || '200';
 const desiredJoueurs = process.env.JOUEURS || '2';
+const waitTimeout = 5 * 60 * 1000;
 
 process.env.DISPLAY = ':99';
 
@@ -20,8 +21,6 @@ const screenshotsDir = path.join(__dirname, 'screenshots');
 if (!fs.existsSync(screenshotsDir)) fs.mkdirSync(screenshotsDir, { recursive: true });
 
 const DASHBOARD_FILE = path.join(__dirname, 'dashboard', 'game_state.json');
-const DASHBOARD_DIR = path.join(__dirname, 'dashboard');
-if (!fs.existsSync(DASHBOARD_DIR)) fs.mkdirSync(DASHBOARD_DIR, { recursive: true });
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -48,17 +47,25 @@ async function fillFieldHuman(page, selector, value, fieldName) {
     await delay(200 + Math.random() * 300);
 }
 
+async function humanClickAt(page, coords) {
+    const start = await page.evaluate(() => ({ x: window.innerWidth / 2, y: window.innerHeight / 2 }));
+    const steps = 20;
+    for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+        const cp = { x: start.x + (Math.random() - 0.5) * 100, y: start.y + (Math.random() - 0.5) * 100 };
+        const x = Math.pow(1 - t, 2) * start.x + 2 * (1 - t) * t * cp.x + Math.pow(t, 2) * coords.x;
+        const y = Math.pow(1 - t, 2) * start.y + 2 * (1 - t) * t * cp.y + Math.pow(t, 2) * coords.y;
+        await page.mouse.move(x, y);
+        await delay(15);
+    }
+    await page.mouse.click(coords.x, coords.y);
+}
+
 async function findButtonByText(page, text) {
     const btns = await page.$$('button');
     for (const btn of btns) {
         const txt = await page.evaluate(el => el.textContent.trim(), btn);
         if (txt === text) return btn;
-    }
-    // Chercher aussi dans les liens et autres éléments cliquables
-    const elements = await page.$$('a, button, [role="button"], input[type="submit"]');
-    for (const el of elements) {
-        const txt = await page.evaluate(el => el.textContent.trim() || el.value || '', el);
-        if (txt === text) return el;
     }
     return null;
 }
@@ -99,7 +106,12 @@ async function getPlayableDominoes(page) {
             const right = el.querySelector('.domino_right');
             const lv = left ? (left.dataset?.value || left.getAttribute('data-value') || left.textContent.trim()) : '?';
             const rv = right ? (right.dataset?.value || right.getAttribute('data-value') || right.textContent.trim()) : '?';
-            return { value: `${lv}:${rv}`, leftVal: lv, rightVal: rv, index: el.getAttribute('data-index') };
+            return {
+                value: `${lv}:${rv}`,
+                leftVal: lv,
+                rightVal: rv,
+                index: el.getAttribute('data-index')
+            };
         });
         dominoes.push({ handle, ...info });
     }
@@ -117,12 +129,17 @@ async function getFullHand(page) {
                 const right = d.querySelector('.domino_right');
                 const lv = left ? (left.dataset?.value || left.getAttribute('data-value') || left.textContent.trim()) : '?';
                 const rv = right ? (right.dataset?.value || right.getAttribute('data-value') || right.textContent.trim()) : '?';
-                return { value: `${lv}:${rv}`, leftVal: lv, rightVal: rv, playable: d.classList.contains('cursor_pointer') };
+                return {
+                    value: `${lv}:${rv}`,
+                    leftVal: lv,
+                    rightVal: rv,
+                    playable: d.classList.contains('cursor_pointer')
+                };
             });
     });
 }
 
-// --- Suivi des dominos joués ---
+// --- Suivi des dominos déjà joués ---
 let playedDominoes = new Set();
 
 function normalize(v1, v2) {
@@ -149,13 +166,15 @@ async function updatePlayedDominoes(page) {
     });
 }
 
-// --- Stratégie ---
+// --- Stratégie ultra-professionnelle ---
 function getUnknownDominoes(playedSet, myHandSet) {
     const unknown = new Set();
     for (let i = 0; i <= 6; i++) {
         for (let j = i; j <= 6; j++) {
             const dom = normalize(i, j);
-            if (!playedSet.has(dom) && !myHandSet.has(dom)) unknown.add(dom);
+            if (!playedSet.has(dom) && !myHandSet.has(dom)) {
+                unknown.add(dom);
+            }
         }
     }
     return unknown;
@@ -194,6 +213,7 @@ function scoreMove(domino, ends, hand, playedSet, unknownSet) {
     const newLeft = matchesLeft ? (valLeft === parseInt(left) ? valRight : valLeft) : left;
     const newRight = matchesRight ? (valLeft === parseInt(right) ? valRight : valLeft) : right;
 
+    // Blocage de l'adversaire
     if (newLeft === newRight) {
         const remaining = countRemainingInUnknown(parseInt(newLeft), unknownSet);
         if (remaining <= 1) score += 70;
@@ -201,13 +221,18 @@ function scoreMove(domino, ends, hand, playedSet, unknownSet) {
         else score += 10;
     }
 
+    // Réduction de la somme de la main
     const handSum = hand.reduce((sum, d) => sum + parseInt(d.leftVal) + parseInt(d.rightVal), 0);
     const dominoSum = valLeft + valRight;
     const remainingSum = handSum - dominoSum;
     score -= remainingSum * 0.7;
 
-    if (domino.leftVal === domino.rightVal) score += 15;
+    // Se débarrasser des doubles
+    if (domino.leftVal === domino.rightVal) {
+        score += 15;
+    }
 
+    // Anticipation des valeurs probables de l'adversaire
     const likelyAdversary = getLikelyAdversaryValues(unknownSet);
     if (likelyAdversary.has(newLeft.toString())) score -= 25;
     if (likelyAdversary.has(newRight.toString())) score -= 25;
@@ -254,14 +279,14 @@ async function playTurn(page, previousHandCount, failedValues) {
     console.log(`🖐️ ${hand.length} dominos jouables`);
 
     if (hand.length === 0) {
-        console.log('🤷 Aucun domino jouable, on passe.');
+        console.log('🤷 Aucun domino jouable, le site va sauter automatiquement.');
         return { status: 'skipped' };
     }
 
     const myHandSet = new Set(hand.map(d => d.value));
     const unknownSet = getUnknownDominoes(playedDominoes, myHandSet);
     const chosen = chooseBestDomino(hand, ends, playedDominoes, unknownSet, failedValues);
-    console.log(`🎯 Choix : ${chosen.value}`);
+    console.log(`🎯 Choix : ${chosen.value} (gauche=${chosen.leftVal}, droite=${chosen.rightVal})`);
 
     let success = false;
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -277,14 +302,24 @@ async function playTurn(page, previousHandCount, failedValues) {
             return null;
         }, { leftVal: chosen.leftVal, rightVal: chosen.rightVal });
 
-        if (!dominoElement) { await delay(300); continue; }
+        if (!dominoElement) {
+            console.log(`⚠️ Tentative ${attempt + 1} : domino introuvable.`);
+            await delay(300);
+            continue;
+        }
 
         const box = await dominoElement.boundingBox();
-        if (!box) { await delay(300); continue; }
+        if (!box) {
+            console.log(`⚠️ Tentative ${attempt + 1} : boundingBox null.`);
+            await delay(300);
+            continue;
+        }
 
-        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+        const x = box.x + box.width / 2;
+        const y = box.y + box.height / 2;
+        await page.mouse.click(x, y);
         await delay(200);
-        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.click(x, y);
         success = true;
         break;
     }
@@ -311,7 +346,7 @@ async function playTurn(page, previousHandCount, failedValues) {
     });
 
     if (newHandCount >= previousHandCount) {
-        console.log('⚠️ Le coup semble avoir échoué.');
+        console.log('⚠️ Le coup semble avoir échoué (main inchangée).');
         return { status: 'failed', failedValue: chosen.value };
     }
 
@@ -319,36 +354,69 @@ async function playTurn(page, previousHandCount, failedValues) {
     return { status: 'played' };
 }
 
-// --- Détection de fin ---
+// --- Détection de fin de manche ---
 async function isRoundOver(page) {
     return await page.evaluate(() => {
         const bodyText = document.body.innerText.toLowerCase();
         if (/prochain round dans|next round in/i.test(bodyText)) return true;
-        if (/a gagné|manche terminée|score final|revanche/i.test(bodyText) && !/c['’]?est votre tour|à vous de jouer/i.test(bodyText)) return true;
+        if (/a gagné|manche terminée|score final|revanche/i.test(bodyText) &&
+            !/c['’]?est votre tour|à vous de jouer/i.test(bodyText)) return true;
+        const popupSelectors = ['.modal', '.popup', '.overlay', '.victory', '.defeat'];
+        for (const sel of popupSelectors) {
+            const el = document.querySelector(sel);
+            if (el && el.offsetParent !== null) {
+                if (/a gagné|manche terminée|score final|revanche/i.test(el.textContent)) return true;
+            }
+        }
+        const buttons = [...document.querySelectorAll('button')];
+        const endTexts = ['rejouer', 'suivant', 'menu', 'quitter'];
+        const hasEndButton = buttons.some(btn => endTexts.some(t => btn.textContent.trim().toLowerCase().includes(t)) && btn.offsetParent !== null);
+        const board = document.querySelector('.domino_board');
+        if (hasEndButton && !board) return true;
         return false;
     });
 }
 
+// --- Détection de fin de match ---
 async function isMatchOver(page) {
     return await page.evaluate(() => {
         const bodyText = document.body.innerText.toLowerCase();
-        if (/match terminé|victoire|défaite|match over|you win|you lose/i.test(bodyText)) return true;
+        if (/a remporté le match|match terminé|vous avez gagné|vous avez perdu|score final|victoire !|défaite !|match gagné|match perdu|vous remportez|vous perdez/i.test(bodyText)) return true;
+        const buttons = [...document.querySelectorAll('button')];
+        for (const btn of buttons) {
+            const txt = btn.textContent.trim().toLowerCase();
+            if ((txt.includes('terminé') || txt.includes('terminer') || txt.includes('quitter le match') || txt.includes('menu principal')) && btn.offsetParent !== null) return true;
+        }
         return false;
     });
 }
 
+// --- Attente combinée ---
 async function waitForMyTurnOrRoundEnd(page, timeout = 28000) {
     console.log('⏳ Attente de mon tour...');
     const start = Date.now();
     while (Date.now() - start < timeout) {
         await killChromePopups(page);
-        if (await isRoundOver(page)) return 'round_over';
+        if (await isRoundOver(page)) {
+            console.log('🏁 Fin de manche détectée pendant l\'attente.');
+            return 'round_over';
+        }
+        const board = await page.$('.domino_board');
+        if (!board) {
+            await delay(1000);
+            continue;
+        }
         const myTurn = await page.evaluate(() => {
-            return /c['’]?est votre tour/i.test(document.body.innerText) || /à vous de jouer/i.test(document.body.innerText);
+            const bodyText = document.body.innerText;
+            return /c['’]?est votre tour/i.test(bodyText) || /à vous de jouer/i.test(bodyText);
         });
-        if (myTurn) { console.log('🔔 Mon tour !'); return 'my_turn'; }
+        if (myTurn) {
+            console.log('🔔 C\'est mon tour !');
+            return 'my_turn';
+        }
         await delay(1000);
     }
+    console.log('⚠️ Tour non détecté dans le délai imparti.');
     return 'timeout';
 }
 
@@ -389,157 +457,124 @@ async function extractFullGameState(page) {
 function saveGameState(state) {
     try {
         fs.writeFileSync(DASHBOARD_FILE, JSON.stringify(state, null, 2));
-    } catch (err) {}
+    } catch (err) {
+        console.error('Erreur dashboard:', err.message);
+    }
 }
 
-// --- Jouer une manche ---
+// --- Jouer une manche complète ---
 async function playOneRound(page, roundNumber) {
     console.log(`\n🎲 Début de la manche ${roundNumber}`);
     await delay(3000);
     playedDominoes.clear();
+    let turn = 1;
     let consecutiveMisses = 0;
     let failedValues = new Set();
 
     while (true) {
+        // Dashboard
         try {
             const state = await extractFullGameState(page);
             saveGameState(state);
         } catch (e) {}
 
+        const board = await page.$('.domino_board');
+        if (!board) {
+            console.log('⚠️ Plateau disparu, attente...');
+            const start = Date.now();
+            while (Date.now() - start < 30000) {
+                if (await isRoundOver(page)) break;
+                if (await page.$('.domino_board')) break;
+                await delay(2000);
+            }
+            if (await isRoundOver(page)) break;
+            if (!(await page.$('.domino_board'))) break;
+            continue;
+        }
+
         const waitResult = await waitForMyTurnOrRoundEnd(page);
-        if (waitResult === 'round_over') { console.log('🏁 Manche terminée.'); break; }
+        if (waitResult === 'round_over') break;
         if (waitResult === 'timeout') {
             consecutiveMisses++;
-            if (consecutiveMisses >= 5) { console.log('⚠️ Trop de tours manqués, fin de manche.'); break; }
+            if (consecutiveMisses >= 5) break;
             await delay(2000);
             continue;
         }
 
         consecutiveMisses = 0;
-        if (await isRoundOver(page)) { console.log('🏁 Fin de manche.'); break; }
+        if (await isRoundOver(page)) break;
 
         const fullHand = await getFullHand(page);
-        console.log(`🃏 Main : ${fullHand.length} dominos`);
+        console.log(`🃏 Main (tour ${turn}, ${fullHand.length} dominos)`);
 
         const result = await playTurn(page, fullHand.length, failedValues);
         if (result.status === 'failed' && result.failedValue) {
             failedValues.add(result.failedValue);
             if (failedValues.size >= 3) failedValues.clear();
+        } else {
+            turn++;
         }
-
         await delay(1000);
     }
-
-    try {
-        const state = await extractFullGameState(page);
-        saveGameState(state);
-    } catch (e) {}
 }
 
-// --- Principal ---
+// --- Fonction principale ---
 async function main() {
-    console.log('🚀 Démarrage du bot kitabo...');
+    console.log('🚀 Démarrage du bot...');
     console.log(`📱 ${phone} | Score: ${desiredScore} | Mise: ${desiredMise}`);
 
     const { browser, page } = await connect({
         headless: false,
         args: [
-            '--no-sandbox', '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage', '--disable-gpu'
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--disable-gpu'
         ],
         turnstile: true,
-        connectOption: { defaultViewport: { width: 1280, height: 720 } }
+        connectOption: {
+            defaultViewport: {
+                width: 1280,
+                height: 720
+            }
+        }
     });
 
     console.log('✅ Navigateur lancé');
 
     try {
-        // Aller sur GoodLoka
-        await page.goto('https://goodloka.com', { waitUntil: 'networkidle2', timeout: 30000 });
-        console.log('📄 Page chargée');
+        // Connexion
+        await page.goto('https://goodloka.com/login', { waitUntil: 'networkidle2' });
+        console.log('📄 Page de connexion chargée');
         await delay(3000);
 
-        // Screenshot pour debug
-        await page.screenshot({ path: path.join(screenshotsDir, 'page_accueil.png') });
-        console.log('📸 Screenshot sauvegardé');
+        await page.screenshot({ path: path.join(screenshotsDir, 'login.png') });
 
-        // Chercher et remplir les champs de connexion
-        console.log('🔍 Recherche des champs de connexion...');
+        await fillFieldHuman(page, 'input[type="tel"]', phone, 'Téléphone');
+        await fillFieldHuman(page, 'input[type="password"]', password, 'Mot de passe');
 
-        // Chercher tous les inputs
-        const inputs = await page.$$('input');
-        console.log(`📋 ${inputs.length} inputs trouvés`);
-
-        for (const input of inputs) {
-            const type = await input.evaluate(el => el.type);
-            const name = await input.evaluate(el => el.name);
-            const placeholder = await input.evaluate(el => el.placeholder);
-            console.log(`   Input: type=${type}, name=${name}, placeholder=${placeholder}`);
-        }
-
-        // Essayer de remplir le téléphone
-        let filled = false;
-        for (const selector of ['input[type="tel"]', 'input[name="phone"]', 'input[placeholder*="phone"]', 'input[placeholder*="téléphone"]', 'input[placeholder*="numéro"]']) {
-            try {
-                await page.waitForSelector(selector, { timeout: 3000 });
-                await fillFieldHuman(page, selector, phone, 'Téléphone');
-                filled = true;
-                console.log(`✅ Téléphone rempli avec: ${selector}`);
-                break;
-            } catch (e) {}
-        }
-        if (!filled) {
-            // Prendre tous les inputs visibles et remplir le premier
-            const visibleInputs = await page.$$('input:not([type="hidden"])');
-            if (visibleInputs.length >= 1) {
-                await visibleInputs[0].click({ clickCount: 3 });
-                await page.keyboard.press('Backspace');
-                await page.keyboard.type(phone, { delay: 50 });
-                console.log('✅ Téléphone rempli (fallback)');
-            }
-        }
-
-        // Essayer de remplir le mot de passe
-        filled = false;
-        for (const selector of ['input[type="password"]', 'input[name="password"]']) {
-            try {
-                await page.waitForSelector(selector, { timeout: 3000 });
-                await fillFieldHuman(page, selector, password, 'Mot de passe');
-                filled = true;
-                console.log(`✅ Mot de passe rempli avec: ${selector}`);
-                break;
-            } catch (e) {}
-        }
-        if (!filled) {
-            const visibleInputs = await page.$$('input:not([type="hidden"])');
-            if (visibleInputs.length >= 2) {
-                await visibleInputs[1].click({ clickCount: 3 });
-                await page.keyboard.press('Backspace');
-                await page.keyboard.type(password, { delay: 50 });
-                console.log('✅ Mot de passe rempli (fallback)');
-            }
-        }
-
-        // Cliquer sur connexion
         const loginBtn = await findButtonByText(page, 'Se connecter');
         if (loginBtn) {
             await loginBtn.click();
-            console.log('🔑 Bouton connexion cliqué');
         } else {
-            console.log('⚠️ Bouton connexion non trouvé, tentative Enter');
             await page.keyboard.press('Enter');
         }
-
+        console.log('🔑 Connexion effectuée');
         await delay(5000);
+
         await page.screenshot({ path: path.join(screenshotsDir, 'apres_connexion.png') });
-        console.log('📸 Screenshot après connexion');
 
         // Boucle de jeu
         let roundNumber = 1;
         while (true) {
-            if (await isMatchOver(page)) { console.log('🏆 Match terminé !'); break; }
+            if (await isMatchOver(page)) {
+                console.log('🏆 Match terminé !');
+                break;
+            }
             await playOneRound(page, roundNumber);
             roundNumber++;
+            console.log('⏳ Attente de la prochaine manche...');
             await delay(10000);
         }
 
