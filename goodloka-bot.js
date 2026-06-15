@@ -8,7 +8,6 @@ const password = process.env.PASSWORD;
 const desiredScore = process.env.SCORE || '50';
 const desiredMise  = process.env.MISE || '200';
 const desiredJoueurs = process.env.JOUEURS || '2';
-const waitTimeout = 5 * 60 * 1000;
 
 process.env.DISPLAY = ':99';
 
@@ -21,6 +20,8 @@ const screenshotsDir = path.join(__dirname, 'screenshots');
 if (!fs.existsSync(screenshotsDir)) fs.mkdirSync(screenshotsDir, { recursive: true });
 
 const DASHBOARD_FILE = path.join(__dirname, 'dashboard', 'game_state.json');
+const DASHBOARD_DIR = path.join(__dirname, 'dashboard');
+if (!fs.existsSync(DASHBOARD_DIR)) fs.mkdirSync(DASHBOARD_DIR, { recursive: true });
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -62,10 +63,12 @@ async function humanClickAt(page, coords) {
 }
 
 async function findButtonByText(page, text) {
-    const btns = await page.$$('button');
-    for (const btn of btns) {
-        const txt = await page.evaluate(el => el.textContent.trim(), btn);
-        if (txt === text) return btn;
+    const elements = await page.$$('button, a, [role="button"], input[type="submit"]');
+    for (const el of elements) {
+        try {
+            const txt = await page.evaluate(el => el.textContent.trim() || el.value || '', el);
+            if (txt.toLowerCase().includes(text.toLowerCase())) return el;
+        } catch (e) {}
     }
     return null;
 }
@@ -106,12 +109,7 @@ async function getPlayableDominoes(page) {
             const right = el.querySelector('.domino_right');
             const lv = left ? (left.dataset?.value || left.getAttribute('data-value') || left.textContent.trim()) : '?';
             const rv = right ? (right.dataset?.value || right.getAttribute('data-value') || right.textContent.trim()) : '?';
-            return {
-                value: `${lv}:${rv}`,
-                leftVal: lv,
-                rightVal: rv,
-                index: el.getAttribute('data-index')
-            };
+            return { value: `${lv}:${rv}`, leftVal: lv, rightVal: rv, index: el.getAttribute('data-index') };
         });
         dominoes.push({ handle, ...info });
     }
@@ -129,17 +127,12 @@ async function getFullHand(page) {
                 const right = d.querySelector('.domino_right');
                 const lv = left ? (left.dataset?.value || left.getAttribute('data-value') || left.textContent.trim()) : '?';
                 const rv = right ? (right.dataset?.value || right.getAttribute('data-value') || right.textContent.trim()) : '?';
-                return {
-                    value: `${lv}:${rv}`,
-                    leftVal: lv,
-                    rightVal: rv,
-                    playable: d.classList.contains('cursor_pointer')
-                };
+                return { value: `${lv}:${rv}`, leftVal: lv, rightVal: rv, playable: d.classList.contains('cursor_pointer') };
             });
     });
 }
 
-// --- Suivi des dominos déjà joués ---
+// --- Suivi des dominos ---
 let playedDominoes = new Set();
 
 function normalize(v1, v2) {
@@ -160,23 +153,18 @@ async function updatePlayedDominoes(page) {
         });
     });
     dominoes.forEach(d => {
-        if (d.left !== '?' && d.right !== '?') {
-            playedDominoes.add(normalize(d.left, d.right));
-        }
+        if (d.left !== '?' && d.right !== '?') playedDominoes.add(normalize(d.left, d.right));
     });
 }
 
-// --- Stratégie ultra-professionnelle ---
+// --- Stratégie ---
 function getUnknownDominoes(playedSet, myHandSet) {
     const unknown = new Set();
-    for (let i = 0; i <= 6; i++) {
+    for (let i = 0; i <= 6; i++)
         for (let j = i; j <= 6; j++) {
             const dom = normalize(i, j);
-            if (!playedSet.has(dom) && !myHandSet.has(dom)) {
-                unknown.add(dom);
-            }
+            if (!playedSet.has(dom) && !myHandSet.has(dom)) unknown.add(dom);
         }
-    }
     return unknown;
 }
 
@@ -213,7 +201,6 @@ function scoreMove(domino, ends, hand, playedSet, unknownSet) {
     const newLeft = matchesLeft ? (valLeft === parseInt(left) ? valRight : valLeft) : left;
     const newRight = matchesRight ? (valLeft === parseInt(right) ? valRight : valLeft) : right;
 
-    // Blocage de l'adversaire
     if (newLeft === newRight) {
         const remaining = countRemainingInUnknown(parseInt(newLeft), unknownSet);
         if (remaining <= 1) score += 70;
@@ -221,18 +208,12 @@ function scoreMove(domino, ends, hand, playedSet, unknownSet) {
         else score += 10;
     }
 
-    // Réduction de la somme de la main
     const handSum = hand.reduce((sum, d) => sum + parseInt(d.leftVal) + parseInt(d.rightVal), 0);
     const dominoSum = valLeft + valRight;
-    const remainingSum = handSum - dominoSum;
-    score -= remainingSum * 0.7;
+    score -= (handSum - dominoSum) * 0.7;
 
-    // Se débarrasser des doubles
-    if (domino.leftVal === domino.rightVal) {
-        score += 15;
-    }
+    if (domino.leftVal === domino.rightVal) score += 15;
 
-    // Anticipation des valeurs probables de l'adversaire
     const likelyAdversary = getLikelyAdversaryValues(unknownSet);
     if (likelyAdversary.has(newLeft.toString())) score -= 25;
     if (likelyAdversary.has(newRight.toString())) score -= 25;
@@ -260,10 +241,7 @@ function chooseBestDomino(hand, ends, playedSet, unknownSet, excludeValues = new
     let bestScore = -Infinity;
     for (const domino of effectiveHand) {
         const s = scoreMove(domino, ends, effectiveHand, playedSet, unknownSet);
-        if (s > bestScore) {
-            bestScore = s;
-            best = domino;
-        }
+        if (s > bestScore) { bestScore = s; best = domino; }
     }
     return best || effectiveHand[0];
 }
@@ -279,14 +257,14 @@ async function playTurn(page, previousHandCount, failedValues) {
     console.log(`🖐️ ${hand.length} dominos jouables`);
 
     if (hand.length === 0) {
-        console.log('🤷 Aucun domino jouable, le site va sauter automatiquement.');
+        console.log('🤷 Aucun domino jouable.');
         return { status: 'skipped' };
     }
 
     const myHandSet = new Set(hand.map(d => d.value));
     const unknownSet = getUnknownDominoes(playedDominoes, myHandSet);
     const chosen = chooseBestDomino(hand, ends, playedDominoes, unknownSet, failedValues);
-    console.log(`🎯 Choix : ${chosen.value} (gauche=${chosen.leftVal}, droite=${chosen.rightVal})`);
+    console.log(`🎯 Choix : ${chosen.value}`);
 
     let success = false;
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -302,41 +280,26 @@ async function playTurn(page, previousHandCount, failedValues) {
             return null;
         }, { leftVal: chosen.leftVal, rightVal: chosen.rightVal });
 
-        if (!dominoElement) {
-            console.log(`⚠️ Tentative ${attempt + 1} : domino introuvable.`);
-            await delay(300);
-            continue;
-        }
+        if (!dominoElement) { await delay(300); continue; }
 
         const box = await dominoElement.boundingBox();
-        if (!box) {
-            console.log(`⚠️ Tentative ${attempt + 1} : boundingBox null.`);
-            await delay(300);
-            continue;
-        }
+        if (!box) { await delay(300); continue; }
 
-        const x = box.x + box.width / 2;
-        const y = box.y + box.height / 2;
-        await page.mouse.click(x, y);
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
         await delay(200);
-        await page.mouse.click(x, y);
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
         success = true;
         break;
     }
 
     if (!success) {
-        console.log('❌ Impossible de cliquer sur le domino.');
+        console.log('❌ Impossible de cliquer.');
         return { status: 'failed', failedValue: chosen.value };
     }
 
     const jouerBtn = await findButtonByText(page, 'Jouer');
-    if (jouerBtn) {
-        await jouerBtn.click();
-        console.log('🖱️ Jouer');
-    } else {
-        await page.keyboard.press('Enter');
-        console.log('⏎ Entrée');
-    }
+    if (jouerBtn) { await jouerBtn.click(); console.log('🖱️ Jouer'); }
+    else { await page.keyboard.press('Enter'); console.log('⏎ Entrée'); }
 
     await delay(1500);
     const newHandCount = await page.evaluate(() => {
@@ -346,77 +309,49 @@ async function playTurn(page, previousHandCount, failedValues) {
     });
 
     if (newHandCount >= previousHandCount) {
-        console.log('⚠️ Le coup semble avoir échoué (main inchangée).');
+        console.log('⚠️ Coup échoué.');
         return { status: 'failed', failedValue: chosen.value };
     }
 
-    console.log('✅ Coup joué avec succès.');
+    console.log('✅ Coup joué.');
     return { status: 'played' };
 }
 
-// --- Détection de fin de manche ---
+// --- Détection fin ---
 async function isRoundOver(page) {
     return await page.evaluate(() => {
         const bodyText = document.body.innerText.toLowerCase();
         if (/prochain round dans|next round in/i.test(bodyText)) return true;
-        if (/a gagné|manche terminée|score final|revanche/i.test(bodyText) &&
-            !/c['’]?est votre tour|à vous de jouer/i.test(bodyText)) return true;
-        const popupSelectors = ['.modal', '.popup', '.overlay', '.victory', '.defeat'];
-        for (const sel of popupSelectors) {
-            const el = document.querySelector(sel);
-            if (el && el.offsetParent !== null) {
-                if (/a gagné|manche terminée|score final|revanche/i.test(el.textContent)) return true;
-            }
-        }
-        const buttons = [...document.querySelectorAll('button')];
-        const endTexts = ['rejouer', 'suivant', 'menu', 'quitter'];
-        const hasEndButton = buttons.some(btn => endTexts.some(t => btn.textContent.trim().toLowerCase().includes(t)) && btn.offsetParent !== null);
-        const board = document.querySelector('.domino_board');
-        if (hasEndButton && !board) return true;
+        if (/a gagné|manche terminée|score final|revanche/i.test(bodyText) && !/c['’]?est votre tour|à vous de jouer/i.test(bodyText)) return true;
+        const popups = document.querySelectorAll('.modal, .popup, .overlay, .victory, .defeat');
+        for (const el of popups)
+            if (el.offsetParent && /a gagné|manche terminée|score final|revanche/i.test(el.textContent)) return true;
         return false;
     });
 }
 
-// --- Détection de fin de match ---
 async function isMatchOver(page) {
     return await page.evaluate(() => {
         const bodyText = document.body.innerText.toLowerCase();
-        if (/a remporté le match|match terminé|vous avez gagné|vous avez perdu|score final|victoire !|défaite !|match gagné|match perdu|vous remportez|vous perdez/i.test(bodyText)) return true;
+        if (/match terminé|victoire|défaite|match over/i.test(bodyText)) return true;
         const buttons = [...document.querySelectorAll('button')];
-        for (const btn of buttons) {
+        return buttons.some(btn => {
             const txt = btn.textContent.trim().toLowerCase();
-            if ((txt.includes('terminé') || txt.includes('terminer') || txt.includes('quitter le match') || txt.includes('menu principal')) && btn.offsetParent !== null) return true;
-        }
-        return false;
+            return (txt.includes('terminé') || txt.includes('menu principal')) && btn.offsetParent !== null;
+        });
     });
 }
 
-// --- Attente combinée ---
 async function waitForMyTurnOrRoundEnd(page, timeout = 28000) {
     console.log('⏳ Attente de mon tour...');
     const start = Date.now();
     while (Date.now() - start < timeout) {
         await killChromePopups(page);
-        if (await isRoundOver(page)) {
-            console.log('🏁 Fin de manche détectée pendant l\'attente.');
-            return 'round_over';
-        }
-        const board = await page.$('.domino_board');
-        if (!board) {
-            await delay(1000);
-            continue;
-        }
-        const myTurn = await page.evaluate(() => {
-            const bodyText = document.body.innerText;
-            return /c['’]?est votre tour/i.test(bodyText) || /à vous de jouer/i.test(bodyText);
-        });
-        if (myTurn) {
-            console.log('🔔 C\'est mon tour !');
-            return 'my_turn';
-        }
+        if (await isRoundOver(page)) return 'round_over';
+        const myTurn = await page.evaluate(() => /c['’]?est votre tour/i.test(document.body.innerText) || /à vous de jouer/i.test(document.body.innerText));
+        if (myTurn) { console.log('🔔 Mon tour !'); return 'my_turn'; }
         await delay(1000);
     }
-    console.log('⚠️ Tour non détecté dans le délai imparti.');
     return 'timeout';
 }
 
@@ -445,42 +380,29 @@ async function extractFullGameState(page) {
             hand, board,
             isMyTurn: /c['’]?est votre tour|à vous de jouer/i.test(bodyText),
             isRoundOver: /prochain round|manche terminée|a gagné/i.test(bodyText),
-            isMatchOver: /match terminé|victoire|défaite/i.test(bodyText),
-            myHandCount: hand.length,
-            boardCount: board.length,
-            lastUpdate: new Date().toLocaleString('fr-FR'),
-            timestamp: Date.now()
+            myHandCount: hand.length, boardCount: board.length,
+            lastUpdate: new Date().toLocaleString('fr-FR')
         };
     });
 }
 
 function saveGameState(state) {
-    try {
-        fs.writeFileSync(DASHBOARD_FILE, JSON.stringify(state, null, 2));
-    } catch (err) {
-        console.error('Erreur dashboard:', err.message);
-    }
+    try { fs.writeFileSync(DASHBOARD_FILE, JSON.stringify(state, null, 2)); } catch (e) {}
 }
 
-// --- Jouer une manche complète ---
+// --- Manche ---
 async function playOneRound(page, roundNumber) {
-    console.log(`\n🎲 Début de la manche ${roundNumber}`);
+    console.log(`\n🎲 Manche ${roundNumber}`);
     await delay(3000);
     playedDominoes.clear();
-    let turn = 1;
     let consecutiveMisses = 0;
     let failedValues = new Set();
 
     while (true) {
-        // Dashboard
-        try {
-            const state = await extractFullGameState(page);
-            saveGameState(state);
-        } catch (e) {}
+        try { saveGameState(await extractFullGameState(page)); } catch (e) {}
 
         const board = await page.$('.domino_board');
         if (!board) {
-            console.log('⚠️ Plateau disparu, attente...');
             const start = Date.now();
             while (Date.now() - start < 30000) {
                 if (await isRoundOver(page)) break;
@@ -505,83 +427,100 @@ async function playOneRound(page, roundNumber) {
         if (await isRoundOver(page)) break;
 
         const fullHand = await getFullHand(page);
-        console.log(`🃏 Main (tour ${turn}, ${fullHand.length} dominos)`);
+        console.log(`🃏 Main : ${fullHand.length} dominos`);
 
         const result = await playTurn(page, fullHand.length, failedValues);
         if (result.status === 'failed' && result.failedValue) {
             failedValues.add(result.failedValue);
             if (failedValues.size >= 3) failedValues.clear();
-        } else {
-            turn++;
         }
         await delay(1000);
     }
 }
 
-// --- Fonction principale ---
+// --- Principal ---
 async function main() {
-    console.log('🚀 Démarrage du bot...');
-    console.log(`📱 ${phone} | Score: ${desiredScore} | Mise: ${desiredMise}`);
+    console.log('🚀 Démarrage...');
+    console.log(`📱 ${phone}`);
 
     const { browser, page } = await connect({
         headless: false,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--disable-gpu'
-        ],
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
         turnstile: true,
-        connectOption: {
-            defaultViewport: {
-                width: 1280,
-                height: 720
-            }
-        }
+        connectOption: { defaultViewport: { width: 1280, height: 720 } }
     });
 
     console.log('✅ Navigateur lancé');
 
     try {
-        // Connexion
-        await page.goto('https://goodloka.com/login', { waitUntil: 'networkidle2' });
-        console.log('📄 Page de connexion chargée');
+        await page.goto('https://goodloka.com/login', { waitUntil: 'networkidle2', timeout: 30000 });
+        console.log('📄 Page login');
         await delay(3000);
 
+        // Screenshot debug
         await page.screenshot({ path: path.join(screenshotsDir, 'login.png') });
 
-        await fillFieldHuman(page, 'input[type="tel"]', phone, 'Téléphone');
-        await fillFieldHuman(page, 'input[type="password"]', password, 'Mot de passe');
-
-        const loginBtn = await findButtonByText(page, 'Se connecter');
-        if (loginBtn) {
-            await loginBtn.click();
-        } else {
-            await page.keyboard.press('Enter');
-        }
-        console.log('🔑 Connexion effectuée');
-        await delay(5000);
-
-        await page.screenshot({ path: path.join(screenshotsDir, 'apres_connexion.png') });
-
-        // Boucle de jeu
-        let roundNumber = 1;
-        while (true) {
-            if (await isMatchOver(page)) {
-                console.log('🏆 Match terminé !');
+        // Remplir téléphone
+        let filled = false;
+        for (const sel of ['input[type="tel"]', 'input[name="phone"]', 'input[placeholder*="téléphone"]', 'input[placeholder*="phone"]']) {
+            try {
+                await fillFieldHuman(page, sel, phone, 'Téléphone');
+                filled = true;
+                console.log(`✅ Téléphone (${sel})`);
                 break;
+            } catch (e) {}
+        }
+        if (!filled) {
+            const inputs = await page.$$('input:not([type="hidden"])');
+            if (inputs.length > 0) {
+                await inputs[0].click({ clickCount: 3 });
+                await page.keyboard.press('Backspace');
+                await page.keyboard.type(phone, { delay: 50 });
+                console.log('✅ Téléphone (fallback)');
             }
-            await playOneRound(page, roundNumber);
-            roundNumber++;
-            console.log('⏳ Attente de la prochaine manche...');
+        }
+
+        // Remplir mot de passe
+        filled = false;
+        for (const sel of ['input[type="password"]', 'input[name="password"]']) {
+            try {
+                await fillFieldHuman(page, sel, password, 'Mot de passe');
+                filled = true;
+                console.log(`✅ Password (${sel})`);
+                break;
+            } catch (e) {}
+        }
+        if (!filled) {
+            const inputs = await page.$$('input:not([type="hidden"])');
+            if (inputs.length > 1) {
+                await inputs[1].click({ clickCount: 3 });
+                await page.keyboard.press('Backspace');
+                await page.keyboard.type(password, { delay: 50 });
+                console.log('✅ Password (fallback)');
+            }
+        }
+
+        // Connexion
+        const loginBtn = await findButtonByText(page, 'connecter');
+        if (loginBtn) { await loginBtn.click(); console.log('🔑 Connecté'); }
+        else { await page.keyboard.press('Enter'); console.log('⏎ Enter'); }
+
+        await delay(5000);
+        await page.screenshot({ path: path.join(screenshotsDir, 'apres_login.png') });
+
+        // Jeu
+        let round = 1;
+        while (true) {
+            if (await isMatchOver(page)) { console.log('🏆 Match terminé'); break; }
+            await playOneRound(page, round);
+            round++;
             await delay(10000);
         }
 
     } catch (error) {
         console.error('❌ Erreur:', error.message);
     } finally {
-        console.log('🛑 Fermeture du navigateur...');
+        console.log('🛑 Fermeture...');
         await browser.close();
     }
 }
