@@ -2,6 +2,30 @@ name: Lancer le bot
 
 on:
   workflow_dispatch:
+    inputs:
+      phone:
+        description: 'Numéro de téléphone'
+        required: true
+        type: string
+      password:
+        description: 'Mot de passe'
+        required: true
+        type: string
+      score:
+        description: 'Score désiré'
+        required: false
+        default: '50'
+        type: string
+      mise:
+        description: 'Mise'
+        required: false
+        default: '200'
+        type: string
+      joueurs:
+        description: 'Nombre de joueurs'
+        required: false
+        default: '2'
+        type: string
 
 jobs:
   run-bot:
@@ -27,11 +51,11 @@ jobs:
       
       - name: Lancer Xvfb et le bot
         env:
-          PHONE: ${{ secrets.PHONE }}
-          PASSWORD: ${{ secrets.PASSWORD }}
-          SCORE: ${{ secrets.SCORE || '50' }}
-          MISE: ${{ secrets.MISE || '200' }}
-          JOUEURS: ${{ secrets.JOUEURS || '2' }}
+          PHONE: ${{ github.event.inputs.phone }}
+          PASSWORD: ${{ github.event.inputs.password }}
+          SCORE: ${{ github.event.inputs.score }}
+          MISE: ${{ github.event.inputs.mise }}
+          JOUEURS: ${{ github.event.inputs.joueurs }}
         run: |
           Xvfb :99 -screen 0 1280x720x24 &
           export DISPLAY=:99
