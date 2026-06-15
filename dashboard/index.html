@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GoodLoka Dashboard</title>
+    <style>
+        body {
+            background: #0f0f23;
+            color: white;
+            font-family: sans-serif;
+            padding: 20px;
+            text-align: center;
+        }
+        .badge {
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 1.2em;
+            font-weight: bold;
+        }
+        .my-turn { background: #00ff88; color: black; }
+        .waiting { background: #ffa502; color: black; }
+        .round-over { background: #e94560; }
+        .domino {
+            display: inline-block;
+            background: white;
+            color: black;
+            padding: 10px;
+            margin: 5px;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+        .playable {
+            border: 3px solid #00ff88;
+            box-shadow: 0 0 15px #00ff88;
+        }
+        .board-domino {
+            display: inline-block;
+            background: #e94560;
+            padding: 8px 12px;
+            margin: 3px;
+            border-radius: 6px;
+            font-weight: bold;
+        }
+        h2 { color: #a8b2d1; margin-top: 30px; }
+        #status { margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <h1>🎲 GoodLoka Bot</h1>
+    
+    <div id="status">
+        <span class="badge waiting" id="statusBadge">⏳ En attente...</span>
+    </div>
+    
+    <p id="updateTime"></p>
+    
+    <h2>🃏 MA MAIN</h2>
+    <div id="handContainer">---</div>
+    
+    <h2>🏁 PLATEAU</h2>
+    <div id="boardContainer">---</div>
+    
+    <p style="color: gray; margin-top: 40px;">Rafraîchit toutes les 3 secondes</p>
+
+    <script>
+        async function refresh() {
+            try {
+                const response = await fetch('game_state.json?t=' + Date.now());
+                const state = await response.json();
+                
+                // Statut
+                const badge = document.getElementById('statusBadge');
+                if (state.isRoundOver) {
+                    badge.textContent = '🏁 MANCHE TERMINÉE';
+                    badge.className = 'badge round-over';
+                } else if (state.isMyTurn) {
+                    badge.textContent = '🎯 MON TOUR !';
+                    badge.className = 'badge my-turn';
+                } else {
+                    badge.textContent = '⏳ EN ATTENTE';
+                    badge.className = 'badge waiting';
+                }
+                
+                document.getElementById('updateTime').textContent = 
+                    'Mis à jour : ' + (state.lastUpdate || 'Inconnu');
+                
+                // Main
+                const handHtml = (state.hand || []).map(d => 
+                    `<span class="domino ${d.playable ? 'playable' : ''}">${d.left}|${d.right}</span>`
+                ).join(' ');
+                document.getElementById('handContainer').innerHTML = handHtml || 'Main vide';
+                
+                // Plateau
+                const boardHtml = (state.board || []).map(d => 
+                    `<span class="board-domino">${d.left}|${d.right}</span>`
+                ).join(' ');
+                document.getElementById('boardContainer').innerHTML = boardHtml || 'Plateau vide';
+                
+            } catch (err) {
+                document.getElementById('statusBadge').textContent = '⏳ En attente du bot...';
+            }
+        }
+        
+        refresh();
+        setInterval(refresh, 3000);
+    </script>
+</body>
+</html>

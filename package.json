@@ -1,0 +1,12 @@
+{
+  "name": "goodloka-bot",
+  "version": "1.0.0",
+  "main": "goodloka-bot.js",
+  "scripts": {
+    "start": "node goodloka-bot.js"
+  },
+  "dependencies": {
+    "puppeteer-real-browser": "^1.0.0",
+    "puppeteer": "^22.0.0"
+  }
+}

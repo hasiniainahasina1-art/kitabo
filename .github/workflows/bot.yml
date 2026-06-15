@@ -1,0 +1,46 @@
+name: Lancer le bot
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Installer Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Installer dépendances
+        run: npm install
+      
+      - name: Installer Xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+      
+      - name: Lancer Xvfb et le bot
+        env:
+          PHONE: ${{ secrets.PHONE }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          SCORE: ${{ secrets.SCORE || '50' }}
+          MISE: ${{ secrets.MISE || '200' }}
+          JOUEURS: ${{ secrets.JOUEURS || '2' }}
+        run: |
+          Xvfb :99 -screen 0 1280x720x24 &
+          export DISPLAY=:99
+          node goodloka-bot.js
+      
+      - name: Déployer sur GitHub Pages
+        if: always()
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./
+          keep_files: true
