@@ -3,106 +3,237 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GoodLoka Dashboard</title>
+    <title>🎲 Kitabo - Live Dashboard</title>
     <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            background: #0f0f23;
-            color: white;
-            font-family: sans-serif;
-            padding: 20px;
-            text-align: center;
-        }
-        .badge {
-            padding: 10px 20px;
-            border-radius: 20px;
-            font-size: 1.2em;
-            font-weight: bold;
-        }
-        .my-turn { background: #00ff88; color: black; }
-        .waiting { background: #ffa502; color: black; }
-        .round-over { background: #e94560; }
-        .domino {
-            display: inline-block;
-            background: white;
-            color: black;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: #0a0a1a;
+            color: #e0e0e0;
             padding: 10px;
-            margin: 5px;
-            border-radius: 8px;
-            font-weight: bold;
-            font-size: 1.1em;
+            min-height: 100vh;
         }
-        .playable {
-            border: 3px solid #00ff88;
-            box-shadow: 0 0 15px #00ff88;
+        .header {
+            text-align: center;
+            padding: 10px 0;
+            background: linear-gradient(135deg, #1a1a3e, #0f0f2a);
+            border-radius: 12px;
+            margin-bottom: 10px;
+        }
+        .header h1 { color: #ff6b6b; font-size: 1.3em; }
+        .header .time { color: #a8b2d1; font-size: 0.7em; margin-top: 3px; }
+
+        .badge {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 0.9em;
+            margin: 8px 0;
+        }
+        .badge-turn { background: #00ff88; color: #000; animation: pulse 1s infinite; }
+        .badge-wait { background: #ffa502; color: #000; }
+        .badge-over { background: #e94560; color: #fff; }
+        @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.06)} }
+
+        .section {
+            background: #12122a;
+            border-radius: 10px;
+            padding: 12px;
+            margin-bottom: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+        .section h2 {
+            font-size: 0.9em;
+            color: #a8b2d1;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-bottom: 1px solid #2a2a4a;
+            padding-bottom: 6px;
+        }
+
+        .domino-row {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .domino-tile {
+            width: 44px;
+            height: 60px;
+            background: #f4f4f4;
+            border-radius: 6px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #1a1a2e;
+            font-size: 1em;
+            box-shadow: 2px 2px 6px rgba(0,0,0,0.3);
+            transition: transform 0.2s;
+        }
+        .domino-tile.playable {
+            border: 2px solid #00ff88;
+            box-shadow: 0 0 12px rgba(0,255,136,0.6);
+            animation: glow 1.5s infinite;
+        }
+        .domino-tile.double {
+            background: linear-gradient(135deg, #ff6b6b, #ff8e8e);
+            color: #fff;
+        }
+        @keyframes glow { 0%,100%{box-shadow:0 0 8px rgba(0,255,136,0.4)} 50%{box-shadow:0 0 20px rgba(0,255,136,0.9)} }
+        .domino-tile .sep { width: 16px; height: 2px; background: #1a1a2e; margin: 1px 0; }
+
+        .board-scroll {
+            display: flex;
+            gap: 5px;
+            overflow-x: auto;
+            padding: 8px 0;
+            -webkit-overflow-scrolling: touch;
         }
         .board-domino {
-            display: inline-block;
             background: #e94560;
-            padding: 8px 12px;
-            margin: 3px;
+            color: #fff;
+            padding: 6px 10px;
             border-radius: 6px;
             font-weight: bold;
+            font-size: 0.85em;
+            white-space: nowrap;
+            flex-shrink: 0;
         }
-        h2 { color: #a8b2d1; margin-top: 30px; }
-        #status { margin: 20px 0; }
+
+        .board-ends {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #0f3460;
+            border-radius: 8px;
+            padding: 8px;
+            margin-top: 8px;
+        }
+        .end-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #e94560;
+            background: #1a1a2e;
+            width: 45px;
+            height: 45px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            border: 2px solid #e94560;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+        }
+        .info-item {
+            background: #16213e;
+            padding: 8px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        .info-item .label { color: #a8b2d1; font-size: 0.65em; text-transform: uppercase; }
+        .info-item .value { color: #00ff88; font-size: 1em; font-weight: bold; margin-top: 2px; }
+
+        .refresh-bar {
+            text-align: center;
+            font-size: 0.7em;
+            color: #a8b2d1;
+            margin-top: 8px;
+        }
+        .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #00ff88; margin-right: 4px; animation: pulse 1s infinite; }
+
+        .board-scroll::-webkit-scrollbar { height: 3px; }
+        .board-scroll::-webkit-scrollbar-track { background: #1a1a2e; border-radius: 2px; }
+        .board-scroll::-webkit-scrollbar-thumb { background: #e94560; border-radius: 2px; }
     </style>
 </head>
 <body>
-    <h1>🎲 GoodLoka Bot</h1>
-    
-    <div id="status">
-        <span class="badge waiting" id="statusBadge">⏳ En attente...</span>
+    <div class="header">
+        <h1>🎲 Kitabo Bot</h1>
+        <div class="time" id="updateTime">En attente...</div>
     </div>
-    
-    <p id="updateTime"></p>
-    
-    <h2>🃏 MA MAIN</h2>
-    <div id="handContainer">---</div>
-    
-    <h2>🏁 PLATEAU</h2>
-    <div id="boardContainer">---</div>
-    
-    <p style="color: gray; margin-top: 40px;">Rafraîchit toutes les 3 secondes</p>
+
+    <div style="text-align:center;">
+        <span class="badge badge-wait" id="statusBadge">⏳ INITIALISATION</span>
+    </div>
+
+    <div class="section">
+        <h2>📊 Infos</h2>
+        <div class="info-grid">
+            <div class="info-item"><span class="label">🎯 Mon tour</span><span class="value" id="myTurn">---</span></div>
+            <div class="info-item"><span class="label">🃏 Ma main</span><span class="value" id="myHandCount">---</span></div>
+            <div class="info-item"><span class="label">🏁 Plateau</span><span class="value" id="boardCount">---</span></div>
+            <div class="info-item"><span class="label">⏱️ Mis à jour</span><span class="value" id="lastUpdate">---</span></div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>🏁 Plateau</h2>
+        <div class="board-ends">
+            <div class="end-value" id="leftEnd">-</div>
+            <span style="color:#a8b2d1;font-size:0.7em;">◄ PLATEAU ►</span>
+            <div class="end-value" id="rightEnd">-</div>
+        </div>
+        <div class="board-scroll" id="boardContainer"><span style="color:#a8b2d1;">Vide</span></div>
+    </div>
+
+    <div class="section">
+        <h2>🃏 Ma Main</h2>
+        <div class="domino-row" id="handContainer"><span style="color:#a8b2d1;">En attente...</span></div>
+    </div>
+
+    <div class="refresh-bar"><span class="dot"></span>Refresh toutes les 3s | Dashboard mis à jour toutes les 15s</div>
 
     <script>
         async function refresh() {
             try {
-                const response = await fetch('game_state.json?t=' + Date.now());
-                const state = await response.json();
-                
+                const r = await fetch('game_state.json?t=' + Date.now());
+                const s = await r.json();
+
                 // Statut
-                const badge = document.getElementById('statusBadge');
-                if (state.isRoundOver) {
-                    badge.textContent = '🏁 MANCHE TERMINÉE';
-                    badge.className = 'badge round-over';
-                } else if (state.isMyTurn) {
-                    badge.textContent = '🎯 MON TOUR !';
-                    badge.className = 'badge my-turn';
-                } else {
-                    badge.textContent = '⏳ EN ATTENTE';
-                    badge.className = 'badge waiting';
-                }
-                
-                document.getElementById('updateTime').textContent = 
-                    'Mis à jour : ' + (state.lastUpdate || 'Inconnu');
-                
+                const b = document.getElementById('statusBadge');
+                if (s.isRoundOver) { b.textContent = '🏁 MANCHE TERMINÉE'; b.className = 'badge badge-over'; }
+                else if (s.isMyTurn) { b.textContent = '🎯 MON TOUR !'; b.className = 'badge badge-turn'; }
+                else { b.textContent = '⏳ EN ATTENTE'; b.className = 'badge badge-wait'; }
+
+                document.getElementById('updateTime').textContent = s.lastUpdate || '';
+                document.getElementById('myTurn').textContent = s.isMyTurn ? '✅ OUI' : '❌ NON';
+                document.getElementById('myHandCount').textContent = s.myHandCount || '?';
+                document.getElementById('boardCount').textContent = s.boardCount || '?';
+                document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('fr-FR');
+
                 // Main
-                const handHtml = (state.hand || []).map(d => 
-                    `<span class="domino ${d.playable ? 'playable' : ''}">${d.left}|${d.right}</span>`
-                ).join(' ');
-                document.getElementById('handContainer').innerHTML = handHtml || 'Main vide';
-                
+                const handHtml = (s.hand || []).map(d => {
+                    const cls = d.playable ? ' playable' : '';
+                    const db = d.left === d.right ? ' double' : '';
+                    return `<div class="domino-tile${cls}${db}"><span>${d.left}</span><span class="sep"></span><span>${d.right}</span></div>`;
+                }).join('');
+                document.getElementById('handContainer').innerHTML = handHtml || '<span style="color:#a8b2d1;">Main vide 🎉</span>';
+
                 // Plateau
-                const boardHtml = (state.board || []).map(d => 
-                    `<span class="board-domino">${d.left}|${d.right}</span>`
-                ).join(' ');
-                document.getElementById('boardContainer').innerHTML = boardHtml || 'Plateau vide';
-                
-            } catch (err) {
+                const board = s.board || [];
+                const boardHtml = board.map(d => `<span class="board-domino">${d.left}|${d.right}</span>`).join('');
+                document.getElementById('boardContainer').innerHTML = boardHtml || '<span style="color:#a8b2d1;">Plateau vide</span>';
+                if (board.length > 0) {
+                    document.getElementById('leftEnd').textContent = board[0].left;
+                    document.getElementById('rightEnd').textContent = board[board.length - 1].right;
+                } else {
+                    document.getElementById('leftEnd').textContent = '-';
+                    document.getElementById('rightEnd').textContent = '-';
+                }
+
+            } catch (e) {
                 document.getElementById('statusBadge').textContent = '⏳ En attente du bot...';
+                document.getElementById('statusBadge').className = 'badge badge-wait';
             }
         }
-        
         refresh();
         setInterval(refresh, 3000);
     </script>
