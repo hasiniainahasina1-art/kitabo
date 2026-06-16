@@ -49,7 +49,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xvfb
       
-      - name: Tuer tout Xvfb existant et lancer le bot
+      - name: Lancer le bot avec dashboard live
         env:
           PHONE: ${{ github.event.inputs.phone }}
           PASSWORD: ${{ github.event.inputs.password }}
@@ -57,19 +57,33 @@ jobs:
           MISE: ${{ github.event.inputs.mise }}
           JOUEURS: ${{ github.event.inputs.joueurs }}
         run: |
-          # Tuer tout processus Xvfb existant
           pkill Xvfb 2>/dev/null || true
-          # Supprimer le lock file
           rm -f /tmp/.X99-lock 2>/dev/null || true
-          rm -f /tmp/.X11-unix/X99 2>/dev/null || true
-          # Lancer Xvfb
-          Xvfb :99 -screen 0 1280x720x24 &
+          Xvfb :99 -screen 0 1920x1080x24 &
           sleep 2
           export DISPLAY=:99
-          # Lancer le bot
-          node goodloka-bot.js
+          
+          # Lancer le bot en arrière-plan
+          node goodloka-bot.js &
+          BOT_PID=$!
+          
+          # Config git
+          git config user.email "kitabo@bot.com"
+          git config user.name "Kitabo Bot"
+          
+          # Boucle de mise à jour du dashboard toutes les 15 secondes
+          while kill -0 $BOT_PID 2>/dev/null; do
+            sleep 15
+            cp dashboard/game_state.json game_state.json 2>/dev/null || true
+            git add game_state.json 2>/dev/null || true
+            git commit -m "📊 dashboard update" 2>/dev/null || true
+            git push origin main:gh-pages --force 2>/dev/null || true
+            echo "📊 Dashboard mis à jour"
+          done
+          
+          wait $BOT_PID
       
-      - name: Déployer sur GitHub Pages
+      - name: Déploiement final sur GitHub Pages
         if: always()
         uses: peaceiris/actions-gh-pages@v3
         with:
